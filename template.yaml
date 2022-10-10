@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Shows how Step Functions workflows can be created without the use of Lambda
+  functions
+
+Globals:
+  Function:
+    Handler: app.lambda_handler
+    Runtime: python3.9
+    Architectures:
+      - x86_64
+
+Resources:
+  # -- Resources used by both "Before" and "After" state machines -- #
+
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+
+  MyDynamoDBTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+  
+  # -- Define Lambda functions used in the "Before" state machine -- #
+
+  UuidGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/uuid_generator
+
+  DownloadS3ObjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/download_s3_object
+  
+  S3ReadPermission:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: DownloadS3ObjectFunction
+      Destination:
+        Id: MyS3Bucket
+      Permissions:
+        - Read
+
+  MergeJsonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/merge_json
+
+  PutDynamoDbItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/put_dynamodb_item
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MyDynamoDBTable
+
+  DynamoDbWritePermission:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: PutDynamoDbItemFunction
+      Destination:
+        Id: MyDynamoDBTable
+      Permissions:
+        - Write
+
+  # -- Define state machine and permissions required -- #
+
+  BeforeStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Principal:
+              Service: states.amazonaws.com
+            Effect: Allow
+            Action: sts:AssumeRole
+
+  BeforeStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/before.asl.yaml
+      DefinitionSubstitutions:
+        UuidGeneratorFunctionArn: !GetAtt UuidGeneratorFunction.Arn
+        DownloadS3ObjectFunctionArn: !GetAtt DownloadS3ObjectFunction.Arn
+        MergeJsonFunctionArn: !GetAtt MergeJsonFunction.Arn
+        PutDynamoDbItemFunctionArn: !GetAtt PutDynamoDbItemFunction.Arn
+      Role: !GetAtt BeforeStateMachineRole.Arn
+  
+  BeforeStateMachineUuidGeneratorLambdaFunctionPermission:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: BeforeStateMachine
+      Destination:
+        Id: UuidGeneratorFunction
+      Permissions:
+        - Write
+
+  BeforeStateMachineDownloadS3ObjectLambdaFunctionPermission:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: BeforeStateMachine
+      Destination:
+        Id: DownloadS3ObjectFunction
+      Permissions:
+        - Write
+
+  BeforeStateMachineMergeJsonLambdaFunctionPermission:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: BeforeStateMachine
+      Destination:
+        Id: MergeJsonFunction
+      Permissions:
+        - Write
+  
+  BeforeStateMachinePutDynamoDbItemLambdaFunctionPermission:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: BeforeStateMachine
+      Destination:
+        Id: PutDynamoDbItemFunction
+      Permissions:
+        - Write

@@ -1,0 +1,75 @@
+# Example Input:
+# {
+#   "file": {
+#     "bucket": "bucket1",
+#     "summaryFile": "file1.json",
+#     "detailFile": "file2.json"
+#   }
+# }
+
+# 1. Generate UUID for ingestion run (New States.UUID intrinsic function)
+# 2. Download files from S3 and return content into state (SDK integration / States.StringToJson)
+# 3. Merge summary and detail together to create enriched content (States.JsonMerge)
+# 4. Put record into DynamoDB
+
+Comment: An example state machine that uses Lambda functions to carry out certain tasks
+StartAt: Generate UUID for ingestion run
+States:
+  Generate UUID for ingestion run:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters:
+      FunctionName: ${UuidGeneratorFunctionArn}
+    ResultSelector:
+      uuid.$: $.Payload
+    ResultPath: $.ingestion
+    Next: Get summary file from S3
+  
+  Get summary file from S3:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters:
+      FunctionName: ${DownloadS3ObjectFunctionArn}
+      Payload:
+        bucket.$: $.file.bucket
+        key.$: $.file.summaryFile
+    ResultSelector:
+      data.$: $.Payload
+    ResultPath: $.summary
+    Next: Get detail file from S3
+  
+  Get detail file from S3:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters:
+      FunctionName: ${DownloadS3ObjectFunctionArn}
+      Payload:
+        bucket.$: $.file.bucket
+        key.$: $.file.detailFile
+    ResultSelector:
+      data.$: $.Payload
+    ResultPath: $.detail
+    Next: Merge summary and detail
+
+  Merge summary and detail:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters:
+      FunctionName: ${MergeJsonFunctionArn}
+      Payload:
+        left.$: $.summary.data
+        right.$: $.detail.data
+    ResultSelector:
+      data.$: $.Payload
+    ResultPath: $.merged
+    Next: Store item
+
+  Store item:
+    Type: Task
+    Resource: arn:aws:states:::lambda:invoke
+    Parameters:
+      FunctionName: ${PutDynamoDbItemFunctionArn}
+      Payload:
+        id.$: $.ingestion.uuid
+        item.$: $.merged.data
+    End: True
