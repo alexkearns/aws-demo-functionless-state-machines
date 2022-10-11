@@ -1,0 +1,70 @@
+# Example Input:
+# {
+#   "file": {
+#     "bucket": "bucket1",
+#     "summaryFile": "file1.json",
+#     "detailFile": "file2.json"
+#   }
+# }
+
+Comment: An example state machine that uses Step Functions integrated features to avoid using Lambda functions
+StartAt: Generate UUID for ingestion run
+States:
+  Generate UUID for ingestion run:
+    Type: Pass
+    Parameters:
+      uuid.$: States.UUID()
+    ResultPath: $.ingestion
+    Next: Get summary file from S3
+  
+  Get summary file from S3:
+    Type: Task
+    Resource: arn:aws:states:::aws-sdk:s3:getObject
+    Parameters:
+      Bucket.$: $.file.bucket
+      Key.$: $.file.summaryFile
+    ResultSelector:
+      data.$: $.Body
+    ResultPath: $.summary
+    Next: Parse summary JSON string
+  
+  Parse summary JSON string:
+    Type: Pass
+    Parameters:
+      data.$: States.StringToJson($.summary.data)
+    ResultPath: $.summary
+    Next: Get detail file from S3
+  
+  Get detail file from S3:
+    Type: Task
+    Resource: arn:aws:states:::aws-sdk:s3:getObject
+    Parameters:
+      Bucket.$: $.file.bucket
+      Key.$: $.file.detailFile
+    ResultSelector:
+      data.$: $.Body
+    ResultPath: $.detail
+    Next: Parse detail JSON string
+  
+  Parse detail JSON string:
+    Type: Pass
+    Parameters:
+      data.$: States.StringToJson($.detail.data)
+    ResultPath: $.detail
+    Next: Merge summary and detail
+
+  Merge summary and detail:
+    Type: Pass
+    Parameters:
+      data.$: States.JsonMerge($.summary.data, $.detail.data, false)
+    ResultPath: $.merged
+    Next: Store object
+
+  Store object:
+    Type: Task
+    Resource: arn:aws:states:::aws-sdk:s3:putObject
+    Parameters:
+      Bucket.$: $.file.bucket
+      Key.$: States.Format('{}-merged.json', $.ingestion.uuid)
+      Body.$: $.merged.data
+    End: true

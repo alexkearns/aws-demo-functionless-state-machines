@@ -16,13 +16,6 @@ Resources:
 
   MyS3Bucket:
     Type: AWS::S3::Bucket
-
-  MyDynamoDBTable:
-    Type: AWS::Serverless::SimpleTable
-    Properties:
-      PrimaryKey:
-        Name: id
-        Type: String
   
   # -- Define Lambda functions used in the "Before" state machine -- #
 
@@ -51,25 +44,22 @@ Resources:
     Properties:
       CodeUri: functions/merge_json
 
-  PutDynamoDbItemFunction:
+  PutS3ObjectFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/put_dynamodb_item
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref MyDynamoDBTable
+      CodeUri: functions/put_s3_object
 
-  DynamoDbWritePermission:
+  FunctionS3WritePermission:
     Type: AWS::Serverless::Connector
     Properties:
       Source:
-        Id: PutDynamoDbItemFunction
+        Id: PutS3ObjectFunction
       Destination:
-        Id: MyDynamoDBTable
+        Id: MyS3Bucket
       Permissions:
         - Write
 
-  # -- Define state machine and permissions required -- #
+  # -- Define "Before" state machine and permissions required -- #
 
   BeforeStateMachineRole:
     Type: AWS::IAM::Role
@@ -90,7 +80,7 @@ Resources:
         UuidGeneratorFunctionArn: !GetAtt UuidGeneratorFunction.Arn
         DownloadS3ObjectFunctionArn: !GetAtt DownloadS3ObjectFunction.Arn
         MergeJsonFunctionArn: !GetAtt MergeJsonFunction.Arn
-        PutDynamoDbItemFunctionArn: !GetAtt PutDynamoDbItemFunction.Arn
+        PutS3ObjectFunctionArn: !GetAtt PutS3ObjectFunction.Arn
       Role: !GetAtt BeforeStateMachineRole.Arn
   
   BeforeStateMachineUuidGeneratorLambdaFunctionPermission:
@@ -123,12 +113,51 @@ Resources:
       Permissions:
         - Write
   
-  BeforeStateMachinePutDynamoDbItemLambdaFunctionPermission:
+  BeforeStateMachinePutObjectLambdaFunctionPermission:
     Type: AWS::Serverless::Connector
     Properties:
       Source:
         Id: BeforeStateMachine
       Destination:
-        Id: PutDynamoDbItemFunction
+        Id: PutS3ObjectFunction
+      Permissions:
+        - Write
+
+  # -- Define "After" state machine and permissions required -- #
+
+  AfterStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Principal:
+              Service: states.amazonaws.com
+            Effect: Allow
+            Action: sts:AssumeRole
+
+  AfterStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/after.asl.yaml
+      Role: !GetAtt AfterStateMachineRole.Arn
+
+  AfterStateMachineS3ReadPermission:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: AfterStateMachine
+      Destination:
+        Id: MyS3Bucket
+      Permissions:
+        - Read
+
+  AfterStateMachineS3WritePermission:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: AfterStateMachine
+      Destination:
+        Id: MyS3Bucket
       Permissions:
         - Write

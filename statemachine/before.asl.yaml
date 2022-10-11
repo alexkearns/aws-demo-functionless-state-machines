@@ -7,11 +7,6 @@
 #   }
 # }
 
-# 1. Generate UUID for ingestion run (New States.UUID intrinsic function)
-# 2. Download files from S3 and return content into state (SDK integration / States.StringToJson)
-# 3. Merge summary and detail together to create enriched content (States.JsonMerge)
-# 4. Put record into DynamoDB
-
 Comment: An example state machine that uses Lambda functions to carry out certain tasks
 StartAt: Generate UUID for ingestion run
 States:
@@ -62,14 +57,15 @@ States:
     ResultSelector:
       data.$: $.Payload
     ResultPath: $.merged
-    Next: Store item
+    Next: Store object
 
-  Store item:
+  Store object:
     Type: Task
     Resource: arn:aws:states:::lambda:invoke
     Parameters:
-      FunctionName: ${PutDynamoDbItemFunctionArn}
+      FunctionName: ${PutS3ObjectFunctionArn}
       Payload:
-        id.$: $.ingestion.uuid
-        item.$: $.merged.data
+        uuid.$: $.ingestion.uuid
+        bucket.$: $.file.bucket
+        body.$: $.merged.data
     End: True
